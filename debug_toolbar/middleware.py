@@ -3,6 +3,7 @@ Debug Toolbar middleware
 """
 import imp
 import thread
+import json
 
 from django.conf import settings
 from django.http import HttpResponseRedirect
@@ -14,6 +15,7 @@ import debug_toolbar.urls
 from debug_toolbar.toolbar.loader import DebugToolbar
 
 _HTML_TYPES = ('text/html', 'application/xhtml+xml')
+_JSON_TYPES = ('application/json',)
 
 
 def replace_insensitive(string, target, replacement):
@@ -129,15 +131,26 @@ class DebugToolbarMiddleware(object):
                     {'redirect_to': redirect_to}
                 )
                 response.cookies = cookies
-        if ('gzip' not in response.get('Content-Encoding', '') and
-                response.get('Content-Type', '').split(';')[0] in _HTML_TYPES):
-            for panel in toolbar.panels:
-                panel.process_response(request, response)
-            response.content = replace_insensitive(
-                smart_unicode(response.content),
-                self.tag,
-                smart_unicode(toolbar.render_toolbar() + self.tag))
-            if response.get('Content-Length', None):
-                response['Content-Length'] = len(response.content)
+        if 'gzip' not in response.get('Content-Encoding', ''):
+            if response.get('Content-Type', '').split(';')[0] in _HTML_TYPES:
+                for panel in toolbar.panels:
+                    panel.process_response(request, response)
+                response.content = replace_insensitive(
+                    smart_unicode(response.content),
+                    self.tag,
+                    smart_unicode(toolbar.render_toolbar() + self.tag))
+                if response.get('Content-Length', None):
+                    response['Content-Length'] = len(response.content)
+            elif (response.get('Content-Type', '').split(';')[0] in _JSON_TYPES
+                    and response.GET.get('debug', False)):
+                try:
+                    parsed_json = json.loads(response.content)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    response.content = json.dumps({'original': parsed_json,
+                                                   'debug': self.stats})
+                    if response.get('Content-Length', None):
+                        response['Content-Length'] = len(response.content)
         del self.__class__.debug_toolbars[ident]
         return response
